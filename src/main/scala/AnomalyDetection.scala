@@ -38,28 +38,26 @@ object AnomalyDetection {
     Point(fields(0).toDouble, fields(1).toDouble)
   }
 
-  def minmaxNormalization(pointsDS: Dataset[Point]) {
-
-//    val initialXCol = pointsDS.select("x")
-//    val xColMin = pointsDS.groupBy().max("x").collect()
-//    print(xColMin)
+  def minmaxNormalization(pointsDS: Dataset[Point]) : Dataset[Point] = {
 
     // Get the current spark session created in main()
     val spark = SparkSession.builder().getOrCreate()
 
     import org.apache.spark.sql.functions._
-    val xColMax = pointsDS.select("x").orderBy(desc("x")).first()
-    val xColMin = pointsDS.select("x").orderBy(asc("x")).first()
-    println("xColMax: " + xColMax.toString)
-    println("xColMin: " + xColMin.toString)
+    val xColMax = pointsDS.select("x").orderBy(desc("x")).first().getDouble(0)
+    val xColMin = pointsDS.select("x").orderBy(asc("x")).first().getDouble(0)
+//    println("xColMax: " + xColMax)
+//    println("xColMin: " + xColMin)
 
-    val yColMax = pointsDS.select("y").orderBy(desc("y")).first()
-    val yColMin = pointsDS.select("y").orderBy(asc("y")).first()
-    println("yColMax: " + yColMax.toString)
-    println("yColMin: " + yColMin.toString)
+    val yColMax = pointsDS.select("y").orderBy(desc("y")).first().getDouble(0)
+    val yColMin = pointsDS.select("y").orderBy(asc("y")).first().getDouble(0)
+//    println("yColMax: " + yColMax)
+//    println("yColMin: " + yColMin)
 
+    import spark.implicits._
+    val normalizedPoints = pointsDS.map(row => Point((row.x - xColMin) / (xColMax - xColMin), (row.y - yColMin) / (yColMax - yColMin)))
 
-
+    normalizedPoints
   }
 
 
@@ -81,30 +79,14 @@ object AnomalyDetection {
 
     val filteredLines = loadedLines.filter(filterLine)
 
-//    val scaler = new MinMaxScaler()
-//      .setInputCol("x")
-//      .setOutputCol("x")
-//      .setMax(1)
-//      .setMin(0)
-//
-//    val normalizedLines = scaler.fit(filteredLines)
-
     val pointLines = filteredLines.map(parseLine)
 
     import spark.implicits._
     val pointsDS = pointLines.toDS()
 
+    val normalizedPoints = minmaxNormalization(pointsDS)
 
-
-    minmaxNormalization(pointsDS)
-
-
-
-//    val xCol = pointsDS.select("x")
-//    xCol.collect.foreach(println)
-//
-//    val yCol = pointsDS.select("y")
-//    yCol.collect.foreach(println)
+    normalizedPoints.collect.foreach(println)
 
     println("Count of filtered entries is: " + pointsDS.count.toString)
 
