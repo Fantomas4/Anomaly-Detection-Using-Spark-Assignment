@@ -1,28 +1,42 @@
 import org.apache.spark.sql._
 import org.apache.log4j._
+import org.apache.spark.ml.feature.MinMaxScaler
 
 
 object AnomalyDetection {
 
-  final case class Point(x: Option[Double], y: Option[Double])
-
-  def parseLine(line: String) : Point = {
-
-    println(line)
+  def filterLine(line: String) : Boolean = {
 
     // Split into words separated by a comma character
     val fields = line.split(",")
 
-    if (fields.length == 2) {
-      if (fields(0) == "") {
-        Point(None, Some(fields(1).toDouble))
-      } else {
-        Point(Some(fields(0).toDouble), Some(fields(1).toDouble))
-      }
+    // if form "number1, number2" is encountered, then fields.length is 2
+    // if form "number1" is encountered, then fields.length is 1
+    // if form ",number2" is encountered, then fields.length is 2 --> fields(0) = "", fields(1) = "number2"
+
+    if (fields.length == 2 && fields(0) == "") {
+      false
+    } else if (fields.length == 1) {
+      false
     } else {
-      // if fields.length == 1
-      Point(Some(fields(0).toDouble), None)
+      true
     }
+  }
+
+  final case class Point(x: Double, y: Double)
+
+//  def parseLine(line: String) : Vector[Double] = {
+//
+//    val fields = line.split(",")
+//
+//    Vector(fields(0).toDouble, fields(1).toDouble)
+//  }
+
+  def parseLine(line: String) : Point = {
+
+    val fields = line.split(",")
+
+    Point(fields(0).toDouble, fields(1).toDouble)
   }
 
 
@@ -38,29 +52,32 @@ object AnomalyDetection {
       .master("local[*]")
       .getOrCreate()
 
-    val lines = spark.sparkContext.textFile("data201920.csv").map(parseLine)
+    val loadedLines = spark.sparkContext.textFile("data201920.csv")
+
+    println("Count of loaded entries: " + loadedLines.count.toString)
+
+    val filteredLines = loadedLines.filter(filterLine)
+
+//    val scaler = new MinMaxScaler()
+//      .setInputCol("x")
+//      .setOutputCol("x")
+//      .setMax(1)
+//      .setMin(0)
+//
+//    val normalizedLines = scaler.fit(filteredLines)
+
+    val pointLines = filteredLines.map(parseLine)
 
     import spark.implicits._
-    val pointsDS = lines.toDS()
+    val pointsDS = pointLines.toDS()
 
-//    pointsDS.collect().foreach(println)
-    val pointElements = pointsDS.collect()
+    val xCol = pointsDS.select("x")
+    xCol.collect.foreach(println)
 
-    for (elem <- pointElements) {
+    val yCol = pointsDS.select("y")
+    yCol.collect.foreach(println)
 
-      val x = elem.x match {
-        case None => ""//Or handle the lack of a value another way: throw an error, etc.
-        case Some(i: Double) => i //return the number to set your value
-      }
-
-      val y = elem.y match {
-        case None => ""//Or handle the lack of a value another way: throw an error, etc.
-        case Some(i: Double) => i //return the number to set your value
-      }
-
-      println("x:" + x.toString + " y:" + y.toString)
-    }
-
+    println("Count of filtered entries is: " + pointsDS.count.toString)
 
     // Stop the session
     spark.stop()
