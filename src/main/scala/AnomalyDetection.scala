@@ -4,7 +4,7 @@ import org.apache.log4j._
 
 object AnomalyDetection {
 
-  final case class Point(x: Double, y: Double)
+  final case class Point(x: Option[Double], y: Option[Double])
 
   def parseLine(line: String) : Point = {
 
@@ -15,13 +15,13 @@ object AnomalyDetection {
 
     if (fields.length == 2) {
       if (fields(0) == "") {
-        Point(None, fields(1).toDouble)
+        Point(None, Some(fields(1).toDouble))
       } else {
-        Point(fields(0).toDouble, fields(1).toDouble)
+        Point(Some(fields(0).toDouble), Some(fields(1).toDouble))
       }
     } else {
       // if fields.length == 1
-      Point(fields(0).toDouble, None)
+      Point(Some(fields(0).toDouble), None)
     }
   }
 
@@ -42,6 +42,25 @@ object AnomalyDetection {
 
     import spark.implicits._
     val pointsDS = lines.toDS()
+
+//    pointsDS.collect().foreach(println)
+    val pointElements = pointsDS.collect()
+
+    for (elem <- pointElements) {
+
+      val x = elem.x match {
+        case None => ""//Or handle the lack of a value another way: throw an error, etc.
+        case Some(i: Double) => i //return the number to set your value
+      }
+
+      val y = elem.y match {
+        case None => ""//Or handle the lack of a value another way: throw an error, etc.
+        case Some(i: Double) => i //return the number to set your value
+      }
+
+      println("x:" + x.toString + " y:" + y.toString)
+    }
+
 
     // Stop the session
     spark.stop()
