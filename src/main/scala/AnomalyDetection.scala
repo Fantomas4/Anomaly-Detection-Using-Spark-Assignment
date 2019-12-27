@@ -1,30 +1,59 @@
 import org.apache.spark.sql._
 import org.apache.log4j._
-
+import org.apache.spark.mllib.clustering.KMeans
+import org.apache.spark.mllib.linalg.Vectors
+import org.apache.spark.rdd.RDD
 
 object AnomalyDetection {
 
-  final case class Point(x: Option[Double], y: Option[Double])
-
-  def parseLine(line: String) : Point = {
-
-    println(line)
+  def filterLine(line: String) : Boolean = {
 
     // Split into words separated by a comma character
     val fields = line.split(",")
 
-    if (fields.length == 2) {
-      if (fields(0) == "") {
-        Point(None, Some(fields(1).toDouble))
-      } else {
-        Point(Some(fields(0).toDouble), Some(fields(1).toDouble))
-      }
+    // if form "number1, number2" is encountered, then fields.length is 2
+    // if form "number1" is encountered, then fields.length is 1
+    // if form ",number2" is encountered, then fields.length is 2 --> fields(0) = "", fields(1) = "number2"
+
+    if (fields.length == 2 && fields(0) == "") {
+      false
+    } else if (fields.length == 1) {
+      false
     } else {
-      // if fields.length == 1
-      Point(Some(fields(0).toDouble), None)
+      true
     }
   }
 
+  def parseLine(line: String) : (Double, Double) = {
+
+    val fields = line.split(",")
+
+    (fields(0).toDouble, fields(1).toDouble)
+  }
+
+  def minmaxNormalization(pointTuples: RDD[(Double, Double)]) : RDD[(Double, Double)] = {
+
+    // Get the current spark session created in main()
+    val spark = SparkSession.builder().getOrCreate()
+
+    import spark.implicits._
+    val pointsDS = pointTuples.toDS()
+
+    import org.apache.spark.sql.functions._
+    val xMax = pointsDS.select("_1").orderBy(desc("_1")).first().getDouble(0)
+    val xMin = pointsDS.select("_1").orderBy(asc("_1")).first().getDouble(0)
+    println("xColMax: " + xMax)
+    println("xColMin: " + xMin)
+
+    val yMax = pointsDS.select("_2").orderBy(desc("_2")).first().getDouble(0)
+    val yMin = pointsDS.select("_2").orderBy(asc("_2")).first().getDouble(0)
+    println("yColMax: " + yMax)
+    println("yColMin: " + yMin)
+
+    val normalizedPointTuples = pointTuples.map(point => ((point._1 - xMin) / (xMax - xMin), (point._2 - yMin) / (yMax - yMin)))
+
+    normalizedPointTuples
+  }
 
   def main(args: Array[String]) {
 
@@ -38,29 +67,22 @@ object AnomalyDetection {
       .master("local[*]")
       .getOrCreate()
 
-    val lines = spark.sparkContext.textFile("data201920.csv").map(parseLine)
+    val loadedLines = spark.sparkContext.textFile("data201920.csv")
 
-    import spark.implicits._
-    val pointsDS = lines.toDS()
+    println("Count of loaded entries: " + loadedLines.count.toString)
 
-//    pointsDS.collect().foreach(println)
-    val pointElements = pointsDS.collect()
+    val filteredLines = loadedLines.filter(filterLine)
 
-    for (elem <- pointElements) {
+    val pointTuples = filteredLines.map(parseLine)
 
-      val x = elem.x match {
-        case None => ""//Or handle the lack of a value another way: throw an error, etc.
-        case Some(i: Double) => i //return the number to set your value
-      }
+    val normPointTuples = minmaxNormalization(pointTuples)
 
-      val y = elem.y match {
-        case None => ""//Or handle the lack of a value another way: throw an error, etc.
-        case Some(i: Double) => i //return the number to set your value
-      }
+    val pointVectors = normPointTuples.map(point => Vectors.dense(point._1, point._2))
 
-      println("x:" + x.toString + " y:" + y.toString)
-    }
-
+    // Cluster the data into two classes using KMeans
+    val numClusters = 4
+    val numIterations = 50
+    val clusters = KMeans.train(pointVectors, numClusters, numIterations)
 
     // Stop the session
     spark.stop()

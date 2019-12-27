@@ -15,6 +15,8 @@ object test {
 
     println(Map(1 -> 7))
 
+    print("mpla" + 3)
+
   }
 }
 
