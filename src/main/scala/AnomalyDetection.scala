@@ -51,7 +51,6 @@ object AnomalyDetection {
     println("yColMin: " + yMin)
 
     val normalizedPointTuples = pointTuples.map(point => ((point._1 - xMin) / (xMax - xMin), (point._2 - yMin) / (yMax - yMin)))
-    normalizedPointTuples.foreach(println)
 
     normalizedPointTuples
   }
