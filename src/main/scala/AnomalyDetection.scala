@@ -3,13 +3,10 @@ import org.apache.log4j._
 import org.apache.spark.mllib.clustering.{KMeans, KMeansModel}
 import org.apache.spark.mllib.linalg.Vectors
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.catalyst.expressions.GenericRowWithSchema
 import org.apache.spark.storage.StorageLevel
 
-import math._
 import org.apache.spark.sql.functions._
 
-import scala.collection.mutable
 
 
 object AnomalyDetection {
@@ -81,7 +78,7 @@ object AnomalyDetection {
       .master("local[*]")
       .getOrCreate()
 
-    val loadedLines = spark.sparkContext.textFile("data201920.csv")
+    val loadedLines = spark.sparkContext.textFile(args(0))
 
     println("Count of loaded entries: " + loadedLines.count.toString)
 
@@ -133,11 +130,11 @@ object AnomalyDetection {
 
 
 
-    //method 1 calculate all the distances in a cluster (bad idea cause even points at the edge of the clusters reported as outliers)
-    val outliers1=Methods.distanceInCluster(clusters)
+    //method 1 calculate all the distances in a cluster,
+    val outliers1=Methods.distanceInCluster(clusters).foreach(println)
 
     //method 2 calculate only distance from center of clusters, O(n)
-    val outliers2=Methods.distanceFromCenters(clusters)
+    val outliers2=Methods.distanceFromCenters(clusters).foreach(println)
 
 
     clusters.unpersist()
