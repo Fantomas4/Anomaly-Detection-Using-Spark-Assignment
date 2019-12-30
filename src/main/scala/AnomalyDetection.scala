@@ -64,25 +64,10 @@ object AnomalyDetection {
     normalizedPointTuples
   }
 
-  def euclideanDistance(x1: Double, y1: Double, x2: Double, y2: Double): Double = {
-    math.sqrt(math.pow((x1 - x2), 2) + math.pow((y1 - y2), 2))
-  }
 
-  def getSumDistance(predicted: Dataset[Row], row: Row): Double = {
-    var sameCluster = null: Dataset[Row]
-    try {
-      sameCluster = predicted.select("x", "y").where("cluster==" + row.getInt(2))
-    } catch {
-      case e: Exception => println(row)
-        return 0.0
-    }
-    val spark = SparkSession.builder().getOrCreate()
-    import spark.implicits._
-    val aSum: Double = sameCluster.map(crow => {
-      euclideanDistance(row.getDouble(0), row.getDouble(1), crow.getDouble(0), crow.getDouble(1))
-    }).agg(sum("value")).head().getDouble(0)
-    aSum
-  }
+
+
+
 
   def main(args: Array[String]) {
 
@@ -108,12 +93,13 @@ object AnomalyDetection {
 
     val pointVectors = normPointTuples.map(point => Vectors.dense(point._1, point._2)).persist(StorageLevel.MEMORY_AND_DISK)
 
-    val numClusters = 5
+    val numClusters = 100
     val numIterations = 50
-    //TODO: run it 5 times and keep the model that minimize the sum of square error
+
+    //run the model more than one time to
     var model:KMeansModel=null
     var cost:Double=Double.MaxValue
-    for (_<- 0 to 10) {
+    for (_<- 0 to 0) {
       val newModel = KMeans.train(pointVectors, numClusters, numIterations)
       val newCost=newModel.computeCost(pointVectors)
       println(newCost)
@@ -123,57 +109,39 @@ object AnomalyDetection {
       }
     }
 
+    //predict the v
     val clustered = model.predict(pointVectors).persist(StorageLevel.MEMORY_AND_DISK)
+
     import spark.implicits._
 
+    // add the column of the predicted clusters together with the cordinates of the point
     val predicted: Dataset[Structs.dataWithClusters] = pointVectors.zip(clustered)
       .map(row => {
         Structs.dataWithClusters((row._1(0), row._1(1)), row._2.toInt)
       }).toDS().persist(StorageLevel.MEMORY_AND_DISK)
 
+    //Clusters contains the cluster id, the sequence of all the points in this cluster and the cordinates of the center of the cluster
     val clusters: RDD[Structs.ClusterIndex] = predicted.select("cluster", "cordinates")
       .groupBy("cluster")
       .agg(collect_list("cordinates").alias("cordinates_list"))
       .rdd
       .map(row => {
-        Structs.ClusterIndex(row.getInt(0), row.getSeq[(Double, Double)](row.fieldIndex("cordinates_list")))
-      })
-
-    //Calculate for every element the distance from the elements in the same cluster
-    val sums:RDD[Structs.ClusterDistances] = clusters.map(c => { //for every cluster
-      val clusterDistances:Seq[Structs.SumDistance]=c.sameCluster.asInstanceOf[Seq[GenericRowWithSchema]].map(element => { //for every coordinate
-        val theSum =c.sameCluster.asInstanceOf[Seq[GenericRowWithSchema]].map(inside => { //loouping through the rest
-          euclideanDistance(element.getDouble(0), element.getDouble(1), inside.getDouble(0), inside.getDouble(1))
-        }).sum
-        Structs.SumDistance((element.getDouble(0),element.getDouble(1)),theSum)
-      })
-      Structs.ClusterDistances(c.cluster,clusterDistances,0,0)
-    })
-
-    //not that we have all the sums in 1 list, we can find the std and calculate the outliers
-    val lists:RDD[Structs.ClusterDistances]=sums.map(row=>{
-      val list=row.distances.map(dRow=>{
-        dRow.sum
-      }).toList
-      val mean = list.sum/ list.size
-      val variance=list.map(a=>math.pow(a-mean,2)).sum/list.size
-      val stdDev=math.sqrt(variance)
-      Structs.ClusterDistances(row.cluster,row.distances,mean,stdDev) //Here we can keep all the metrics if necessary
-    })
-
-    val outliers=lists.map(row=>{
-      val left:Seq[Structs.SumDistance]=row.distances.filter(dRow=>{
-        dRow.sum>row.mean+4*row.stdDev || dRow.sum<row.mean-4*row.stdDev
-      })
-      Structs.ClusterDistances(row.cluster,left,0,0)
-    })
-
-    val test=outliers.collect() // this contains the calculated outliers for the 5 clusters
+        val clusterCenter=model.clusterCenters(row.getInt(0))
+        Structs.ClusterIndex(row.getInt(0), row.getSeq[(Double, Double)](row.fieldIndex("cordinates_list")),(clusterCenter(0),clusterCenter(1)))
+      }).persist(StorageLevel.MEMORY_AND_DISK)
 
 
 
+
+    //method 1 calculate all the distances in a cluster (bad idea cause even points at the edge of the clusters reported as outliers)
+    val outliers1=Methods.distanceInCluster(clusters)
+
+    //method 2 calculate only distance from center of clusters, O(n)
+    val outliers2=Methods.distanceFromCenters(clusters)
+
+
+    clusters.unpersist()
     predicted.unpersist()
-
 
     // Stop the session
     spark.stop()
