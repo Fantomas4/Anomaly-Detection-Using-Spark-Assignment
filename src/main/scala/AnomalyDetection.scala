@@ -42,16 +42,8 @@ object AnomalyDetection {
     (fields(0).toDouble, fields(1).toDouble)
   }
 
-  def minmaxNormalization(pointTuples: RDD[(Double, Double)]): RDD[(Double, Double)] = {
+  def minmaxNormalization(pointTuples: RDD[(Double, Double)], maxMin: Row): RDD[(Double, Double)] = {
 
-    // Get the current spark session created in main()
-    val spark = SparkSession.builder().getOrCreate()
-
-    import spark.implicits._
-    val pointsDF = pointTuples.toDF("x", "y") //by doing it dataFrame you can assign column names
-
-    import org.apache.spark.sql.functions._
-    val maxMin = pointsDF.agg(max("x"), min("x"), max("y"), min("y")).head()
     val normalizedPointTuples = pointTuples.map(point => ((point._1 - maxMin.getDouble(1)) / (maxMin.getDouble(0) - maxMin.getDouble(1)), (point._2 - maxMin.getDouble(3)) / (maxMin.getDouble(2) - maxMin.getDouble(3))))
     normalizedPointTuples
   }
@@ -176,15 +168,34 @@ object AnomalyDetection {
 
     val pointTuples = filteredLines.map(parseLine)
 
-    val normPointTuples = minmaxNormalization(pointTuples)
+    // Calculate the max and min value for the "x" and "y" coordinates
+    // of all given points
 
+    // First, convert pointTuples to a Data Frame in order to assign column names
+    import spark.implicits._
+    val pointsDF = pointTuples.toDF("x", "y")
+
+    // Then, find the max and min values for x and y.
+    // The result is saved inside a Row with the following format:
+    // Row(max("x"), min("x"), max("y"), min("y"))
+    import org.apache.spark.sql.functions._
+    val maxMinCoordinates = pointsDF.agg(max("x"), min("x"), max("y"), min("y")).head()
+
+    // Calculate the normalized points (x and y have values in [0,1])
+    val normPointTuples = minmaxNormalization(pointTuples, maxMinCoordinates)
+
+    // Prepare the points' data for processing by the k-means algorithm
+    // by converting normPointTuples to an RDD[Vector] structure
     val pointVectors = normPointTuples.map(point => Vectors.dense(point._1, point._2)).persist(StorageLevel.MEMORY_AND_DISK)
 
+    // Specify the number of clusters (k) that the k-means algorithm should look for
+    // Specify the number of iterations the k-means algorithm should perform to train
+    // the target model
     val numClusters = 100
     val numIterations = 50
 
-    //run the model more than one time to reduce MSE, but it is too time consuming and Square Error is almost the same
-    //so we will run it only one time
+    // Run the model more than one time to reduce MSE, but it is too time consuming and Square Error is almost the same
+    // so we will run it only one time
     var model:KMeansModel=null
     var cost:Double=Double.MaxValue
     for (_<- 0 to 0) {
