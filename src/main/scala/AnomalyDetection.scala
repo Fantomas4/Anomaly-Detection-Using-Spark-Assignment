@@ -48,6 +48,13 @@ object AnomalyDetection {
     normalizedPointTuples
   }
 
+  def minmaxDenormalization(normalizedValues: Seq[(Double, Double)], maxMin: Row): Seq[(Double, Double)] = {
+
+    val denormalizedValues = normalizedValues.map(point => ((maxMin.getDouble(0) - maxMin.getDouble(1)) * point._1 + maxMin.getDouble(1), (maxMin.getDouble(2) - maxMin.getDouble(3)) * point._2 + maxMin.getDouble(3)))
+
+    denormalizedValues
+  }
+
   /**
    * Calculates the euclidean distance between 2d points
    *
@@ -160,6 +167,7 @@ object AnomalyDetection {
     val spark = SparkSession
       .builder
       .appName("AnomalyDetection")
+      .master("local[*]")
       .getOrCreate()
 
     val loadedLines = spark.sparkContext.textFile(args(0))
@@ -179,10 +187,10 @@ object AnomalyDetection {
     // The result is saved inside a Row with the following format:
     // Row(max("x"), min("x"), max("y"), min("y"))
     import org.apache.spark.sql.functions._
-    val maxMinCoordinates = pointsDF.agg(max("x"), min("x"), max("y"), min("y")).head()
+    val maxMinOfCoordinates = pointsDF.agg(max("x"), min("x"), max("y"), min("y")).head()
 
     // Calculate the normalized points (x and y have values in [0,1])
-    val normPointTuples = minmaxNormalization(pointTuples, maxMinCoordinates)
+    val normPointTuples = minmaxNormalization(pointTuples, maxMinOfCoordinates)
 
     // Prepare the points' data for processing by the k-means algorithm
     // by converting normPointTuples to an RDD[Vector] structure
@@ -235,8 +243,10 @@ object AnomalyDetection {
 //    val outliers1=distanceInCluster(clusters).foreach(println)
 
     //method 2 calculate only distance from center of clusters, O(n)
-    val outliers=distanceFromCenters(clusters).foreach(println)
+//    val outliers=distanceFromCenters(clusters).foreach(println)
+    val normalizedOutliers = distanceFromCenters(clusters)
 
+    val denormalizedOutliers = minmaxDenormalization(normalizedOutliers, maxMinOfCoordinates).foreach(println)
 
     clusters.unpersist()
     predicted.unpersist()
