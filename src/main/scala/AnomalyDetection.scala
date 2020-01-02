@@ -70,7 +70,7 @@ object AnomalyDetection {
 
   /**
    * Finds the outliers by calculating the sum of distances from each point to every point in the same cluster
-   * Outlier => point that the sum of distances deviates more than 3*std from the mean value of this cluster
+   * Outlier => point that the sum of distances deviates more than 4*std from the mean value of this cluster
    *
    * @param clusters contains the information for the clusters
    * @return the outliers
@@ -79,12 +79,12 @@ object AnomalyDetection {
     //Calculate for every element the distance from the elements in the same cluster
     val sums: RDD[ClusterDistances] = clusters.map(c => { //for every cluster
       val clusterDistances: Seq[Distance] = c.sameCluster.asInstanceOf[Seq[GenericRowWithSchema]].map(element => { //for every coordinate
-        val theSum = c.sameCluster.asInstanceOf[Seq[GenericRowWithSchema]].map(inside => { //loouping through the rest
+        val theSum = c.sameCluster.asInstanceOf[Seq[GenericRowWithSchema]].map(inside => { //looping through the rest
           euclideanDistance(element.getDouble(0), element.getDouble(1), inside.getDouble(0), inside.getDouble(1))
-        }).sum
+        }).sum //sum all the distances
         Distance((element.getDouble(0), element.getDouble(1)), theSum)
       })
-      ClusterDistances(c.cluster, clusterDistances, 0, 0)
+      ClusterDistances(c.cluster, clusterDistances, 0, 0) //initialize with 0 mean and 0 stdDev
     })
 
     //not that we have all the sums in 1 list, we can find the std and calculate the outliers
@@ -116,7 +116,7 @@ object AnomalyDetection {
 
   /**
    * Finds the outliers by calculating the distances from each point to the center of the cluster.
-   * Outlier => point that its distance from the center deviates over 3 times the std from the mean value
+   * Outlier => point that its distance from the center deviates over 4 times the std from the mean value
    *
    * @param clusters contains the information for the clusters
    * @return the outliers
@@ -124,12 +124,14 @@ object AnomalyDetection {
   def distanceFromCenters(clusters: RDD[ClusterIndex]): Seq[(Double, Double)] = {
     //get the distance from each point to the center of the custer
     val distances = clusters.map(c => {
-      c.sameCluster.asInstanceOf[Seq[GenericRowWithSchema]].map(cordinate => {
-        val x = cordinate.getDouble(0)
-        val y = cordinate.getDouble(1)
+      c.sameCluster.asInstanceOf[Seq[GenericRowWithSchema]].map(coordinate => {
+        val x = coordinate.getDouble(0)
+        val y = coordinate.getDouble(1)
         Distance((x, y), euclideanDistance(x, y, c.center._1, c.center._2)) //calculates the distance from the center
       })
     })
+    distances.take(10).foreach(println) //printing
+
     val lists: RDD[Seq[Distance]] = distances.map(c => {
       val list: List[Double] = c.map(point => {
         point.distance
@@ -138,10 +140,10 @@ object AnomalyDetection {
       val mean = list.sum / list.size
       val variance = list.map(a => math.pow(a - mean, 2)).sum / list.size
       val stdDev = math.sqrt(variance)
-      c.filter(point => { // the points that have distance form center of the cluster more than 3*std + mean
+      c.filter(point => { // the points that have distance form center of the cluster more than 4*std + mean
         point.distance > mean + 4 * stdDev
       })
-    }).filter(list => {
+    }).filter(list => { //filters out all clusters without outliers
       list.size > 0
     })
     val outliers = new mutable.ArrayBuffer[(Double, Double)]
@@ -150,7 +152,6 @@ object AnomalyDetection {
         outliers.append(point.cordinates)
       })
     })
-
     outliers
   }
 
@@ -216,7 +217,7 @@ object AnomalyDetection {
     }
 
     //predict the clusters for every value
-    val clustered = model.predict(pointVectors).persist(StorageLevel.MEMORY_AND_DISK)
+    val clustered = model.predict(pointVectors)
 
     import spark.implicits._
 
@@ -224,33 +225,27 @@ object AnomalyDetection {
     val predicted: Dataset[dataWithClusters] = pointVectors.zip(clustered)
       .map(row => {
         dataWithClusters((row._1(0), row._1(1)), row._2.toInt)
-      }).toDS().persist(StorageLevel.MEMORY_AND_DISK)
+      }).toDS()
+    predicted.show() //for printing
 
     //Clusters contains the cluster id, the sequence of all the points in this cluster and the cordinates of the center of the cluster
     val clusters: RDD[ClusterIndex] = predicted.select("cluster", "cordinates")
       .groupBy("cluster")
-      .agg(collect_list("cordinates").alias("cordinates_list"))
+      .agg(collect_list("cordinates").alias("coordinates_list"))
       .rdd
       .map(row => {
         val clusterCenter=model.clusterCenters(row.getInt(0))
-        ClusterIndex(row.getInt(0), row.getSeq[(Double, Double)](row.fieldIndex("cordinates_list")),(clusterCenter(0),clusterCenter(1)))
-      }).persist(StorageLevel.MEMORY_AND_DISK)
+        ClusterIndex(row.getInt(0), row.getSeq[(Double, Double)](row.fieldIndex("coordinates_list")),(clusterCenter(0),clusterCenter(1)))
+      })
+    clusters.take(10).foreach(println) // print the clusters
 
 
 
-
-    //method 1 calculate all the distances in a cluster,
-//    val outliers1=distanceInCluster(clusters).foreach(println)
-
-    //method 2 calculate only distance from center of clusters, O(n)
-//    val outliers=distanceFromCenters(clusters).foreach(println)
     val normalizedOutliers = distanceFromCenters(clusters)
 
-    val denormalizedOutliers = minmaxDenormalization(normalizedOutliers, maxMinOfCoordinates).foreach(println)
+    minmaxDenormalization(normalizedOutliers, maxMinOfCoordinates).foreach(println) // printing results
 
-    clusters.unpersist()
-    predicted.unpersist()
-    val seconds=(System.nanoTime()-startingTime)/1000000000
+    val seconds:Double=(System.nanoTime()-startingTime)/1000000000
     println("It took "+seconds+" seconds for the execution")
     // Stop the session
     spark.stop()
