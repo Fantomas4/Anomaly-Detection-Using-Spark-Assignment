@@ -147,8 +147,8 @@ object AnomalyDetection {
       list.size > 0
     })
     val outliers = new mutable.ArrayBuffer[(Double, Double)]
-    lists.collect().foreach(list => { //keep only the coordinates from the outliers
-      list.foreach(point => {
+    lists.collect().foreach(seq => { //keep only the coordinates from the outliers
+      seq.foreach(point => {
         outliers.append(point.coordinates)
       })
     })
