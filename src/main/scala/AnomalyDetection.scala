@@ -14,9 +14,9 @@ object AnomalyDetection {
 
   case class ClusterIndex(cluster:Int,sameCluster:Seq[(Double,Double)],center:(Double,Double))
 
-  case class dataWithClusters(cordinates:(Double,Double),cluster:Int)
+  case class DataWithClusters(coordinates:(Double,Double), cluster:Int)
 
-  case class Distance(cordinates:(Double,Double), distance:Double)
+  case class Distance(coordinates:(Double,Double), distance:Double)
 
   case class ClusterDistances(cluster:Int,distances:Seq[Distance],mean:Double,stdDev:Double)
 
@@ -108,7 +108,7 @@ object AnomalyDetection {
     val outliers = new mutable.ArrayBuffer[(Double,Double)]()
     lists.collect().foreach(cd=>{ //keep only the coordinates from the outliers
       cd.distances.foreach(d=>{
-        outliers.append(d.cordinates)
+        outliers.append(d.coordinates)
       })
     })
     outliers
@@ -149,7 +149,7 @@ object AnomalyDetection {
     val outliers = new mutable.ArrayBuffer[(Double, Double)]
     lists.collect().foreach(list => { //keep only the coordinates from the outliers
       list.foreach(point => {
-        outliers.append(point.cordinates)
+        outliers.append(point.coordinates)
       })
     })
     outliers
@@ -221,17 +221,17 @@ object AnomalyDetection {
 
     import spark.implicits._
 
-    // add the column of the predicted clusters together with the cordinates of the point
-    val predicted: Dataset[dataWithClusters] = pointVectors.zip(clustered)
+    // add the column of the predicted clusters together with the coordinates of the point
+    val predicted: Dataset[DataWithClusters] = pointVectors.zip(clustered)
       .map(row => {
-        dataWithClusters((row._1(0), row._1(1)), row._2.toInt)
+        DataWithClusters((row._1(0), row._1(1)), row._2.toInt)
       }).toDS()
     predicted.show() //for printing
 
-    //Clusters contains the cluster id, the sequence of all the points in this cluster and the cordinates of the center of the cluster
-    val clusters: RDD[ClusterIndex] = predicted.select("cluster", "cordinates")
+    //Clusters contains the cluster id, the sequence of all the points in this cluster and the coordinates of the center of the cluster
+    val clusters: RDD[ClusterIndex] = predicted.select("cluster", "coordinates")
       .groupBy("cluster")
-      .agg(collect_list("cordinates").alias("coordinates_list"))
+      .agg(collect_list("coordinates").alias("coordinates_list"))
       .rdd
       .map(row => {
         val clusterCenter=model.clusterCenters(row.getInt(0))
